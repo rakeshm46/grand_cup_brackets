@@ -177,7 +177,7 @@ function TraderCell({ traderId, score, isWinner, isLoser, isLive, isLeader, isTr
         <span className="mono-flag" aria-hidden="true">{t.flag}</span>
       </span>
       <span className="name">
-        {t.handle}
+        <span className="player-name-text">{t.handle}</span>
         {t.isOutlaw && (
           <span className="outlaw-mark" title="$5,000 bounty on this trader">
             <span className="skull" aria-hidden="true">☠</span>
@@ -1082,7 +1082,7 @@ function MatchModal({ match, onClose, activePool }) {
 function Bracket({ viewState, matches, matchById, onOpenMatch, viewport, setViewport, selectedTraderId, outlawFilterIds, onMatchCount, highlightRound, activePool }) {
   const layout = useLayout();
   const viewRef = useRef(null);
-  const dragRef = useRef({ dragging: false, sx: 0, sy: 0, ox: 0, oy: 0 });
+  const dragRef = useRef({ dragging: false, sx: 0, sy: 0, ox: 0, oy: 0, pinchDist: 0, pinchZ: 0 });
   const [isAnimating, setIsAnimating] = useState(false);
   const animTimer = useRef(null);
   const lastFocusKey = useRef('');
@@ -1091,18 +1091,50 @@ function Bracket({ viewState, matches, matchById, onOpenMatch, viewport, setView
     if (!viewRef.current) return;
     const vw = viewRef.current.clientWidth;
     const vh = viewRef.current.clientHeight;
-    const initialZ = 0.5;
+    
+    // Auto-fit fallback
+    const fitZ = Math.max(0.06, Math.min(1.0, Math.min((vw - 40) / layout.totalW, (vh - 40) / layout.totalH)));
+    let targetZ = fitZ;
+    let targetX = (vw - layout.totalW * fitZ) / 2;
+    let targetY = (vh - layout.totalH * fitZ) / 2;
+
+    // "Live Round" Auto-Focus
+    if (!selectedTraderId) {
+      const liveMatch = matches.find(m => m.status === 'live');
+      if (liveMatch) {
+        const pos = layout.positions[liveMatch.id];
+        if (pos) {
+          targetZ = 0.8; // Premium zoom for live action
+          targetX = vw / 2 - (pos.x + pos.w / 2) * targetZ; // Center the live column horizontally
+          targetY = (vh - layout.totalH * targetZ) / 2;     // Keep vertically centered
+        }
+      }
+    }
+
     setViewport(v => ({
       ...v,
-      zoom: initialZ,
-      x: (vw - layout.totalW * initialZ) / 2,
-      y: (vh - layout.totalH * initialZ) / 2,
+      zoom: targetZ,
+      x: targetX,
+      y: targetY,
     }));
-  }, [layout.totalW, layout.totalH, setViewport]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePool, layout.totalW, layout.totalH, setViewport]);
 
   const onMouseDown = (e) => {
     if (e.target.closest('.match') || e.target.closest('button')) return;
-    dragRef.current = { dragging: true, sx: e.clientX, sy: e.clientY, ox: viewport.x, oy: viewport.y };
+    dragRef.current = { dragging: true, sx: e.clientX, sy: e.clientY, ox: viewport.x, oy: viewport.y, pinchDist: 0, pinchZ: 0 };
+  };
+
+  const onTouchStart = (e) => {
+    if (e.target.closest('.match') || e.target.closest('button')) return;
+    if (e.touches.length === 1) {
+      dragRef.current = { dragging: true, sx: e.touches[0].clientX, sy: e.touches[0].clientY, ox: viewport.x, oy: viewport.y, pinchDist: 0, pinchZ: 0 };
+    } else if (e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      dragRef.current = { dragging: true, sx: 0, sy: 0, ox: viewport.x, oy: viewport.y, pinchDist: dist, pinchZ: viewport.zoom };
+    }
   };
 
   useEffect(() => {
@@ -1112,10 +1144,55 @@ function Bracket({ viewState, matches, matchById, onOpenMatch, viewport, setView
       const dy = e.clientY - dragRef.current.sy;
       setViewport(v => ({ ...v, x: dragRef.current.ox + dx, y: dragRef.current.oy + dy }));
     };
-    const onUp = () => { dragRef.current.dragging = false; };
+    
+    const onTouchMove = (e) => {
+      if (!dragRef.current.dragging) return;
+      if (e.touches.length === 1 && dragRef.current.pinchDist === 0) {
+        // 1-finger pan
+        const dx = e.touches[0].clientX - dragRef.current.sx;
+        const dy = e.touches[0].clientY - dragRef.current.sy;
+        setViewport(v => ({ ...v, x: dragRef.current.ox + dx, y: dragRef.current.oy + dy }));
+      } else if (e.touches.length === 2) {
+        // Prevent Safari from natively scrolling/zooming the page
+        if (e.cancelable) e.preventDefault();
+        
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        
+        if (dragRef.current.pinchDist > 0) {
+          const ratio = dist / dragRef.current.pinchDist;
+          setViewport(v => {
+            const nz = Math.max(0.06, Math.min(1.6, dragRef.current.pinchZ * ratio));
+            const el = viewRef.current;
+            if (!el) return { ...v, zoom: nz };
+            
+            const rect = el.getBoundingClientRect();
+            const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
+            const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top;
+            
+            const k = nz / v.zoom;
+            return { zoom: nz, x: cx - (cx - v.x) * k, y: cy - (cy - v.y) * k };
+          });
+        }
+      }
+    };
+    
+    const onUp = () => { dragRef.current.dragging = false; dragRef.current.pinchDist = 0; };
+    
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('touchmove', onTouchMove, { passive: false });
+    window.addEventListener('touchend', onUp);
+    window.addEventListener('touchcancel', onUp);
+    
+    return () => { 
+      window.removeEventListener('mousemove', onMove); 
+      window.removeEventListener('mouseup', onUp); 
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', onUp);
+      window.removeEventListener('touchcancel', onUp);
+    };
   }, [setViewport]);
 
   useEffect(() => {
@@ -1254,6 +1331,7 @@ function Bracket({ viewState, matches, matchById, onOpenMatch, viewport, setView
       className="bracket-viewport"
       ref={viewRef}
       onMouseDown={onMouseDown}
+      onTouchStart={onTouchStart}
       style={{ cursor: dragRef.current.dragging ? 'grabbing' : 'grab' }}
     >
       <div
@@ -1608,7 +1686,7 @@ function PoolsTabBar({ activePool, setActivePool }) {
   ];
 
   return (
-    <div className="pools-tab-bar" style={{ display: 'flex', justifyContent: 'center', background: '#080c10', borderBottom: '1px solid var(--line-hair)', padding: '10px 0', gap: 8, zIndex: 15, position: 'relative' }}>
+    <div className="pools-tab-bar">
       {pools.map(p => (
         <button
           key={p.key}
@@ -1684,9 +1762,9 @@ export default function BracketPage() {
   }, [matches]);
 
   return (
-    <div className={`page ${isEmbed ? 'is-embed' : ''}`} style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      {!isEmbed && <TopChrome />}
-      {!isEmbed && <Header viewState={viewState} matches={matches} activePool={activePool} />}
+    <div className={`page ${isEmbed ? 'is-embed' : ''}`} style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
+      {/* {!isEmbed && <TopChrome />} */}
+      {/* {!isEmbed && <Header viewState={viewState} matches={matches} activePool={activePool} />} */}
       
       {/* 4 Pools & Championship Navigation selector */}
       <PoolsTabBar activePool={activePool} setActivePool={setActivePool} />
@@ -1731,7 +1809,7 @@ export default function BracketPage() {
         />
       )}
       
-      <LocalTweaksUI tweaks={tweaks} setTweak={setTweak} />
+      {/* <LocalTweaksUI tweaks={tweaks} setTweak={setTweak} /> */}
     </div>
   );
 }
