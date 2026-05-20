@@ -138,7 +138,7 @@ function fmtSigned(n) {
   return (n > 0 ? '+' : n < 0 ? '-' : '') + '$' + Math.abs(Math.round(n)).toLocaleString();
 }
 
-function TraderCell({ traderId, score, isWinner, isLoser, isLive, isLeader, isTrailer, isChampion, cornerClass = '', isOutlawElim = false }) {
+function TraderCell({ traderId, score, isWinner, isLoser, isLive, isLeader, isTrailer, isChampion, cornerClass = '', isOutlawElim = false, wasOutlawEliminated = false }) {
   if (!traderId) {
     return (
       <div className={`cell pending ${cornerClass}`}>
@@ -167,6 +167,7 @@ function TraderCell({ traderId, score, isWinner, isLoser, isLive, isLeader, isTr
 
   return (
     <div className={`cell ${cls} ${cornerClass} ${t.isOutlaw ? 'is-outlaw' : ''}`}>
+      {wasOutlawEliminated && <div className="outlaw-stamp">CAPTURED</div>}
       {isChampion && <span className="crown" aria-hidden="true">👑</span>}
       <span
         className={`avatar mono-avatar ${t.isOutlaw ? 'outlaw' : ''}`}
@@ -178,14 +179,22 @@ function TraderCell({ traderId, score, isWinner, isLoser, isLive, isLeader, isTr
       </span>
       <span className="name">
         <span className="player-name-text">{t.handle}</span>
-        {t.isOutlaw && (
+        {t.isOutlaw && !wasOutlawEliminated && (
           <span className="outlaw-mark" title="$5,000 bounty on this trader">
             <span className="skull" aria-hidden="true">☠</span>
             <span>OUTLAW</span>
           </span>
         )}
+        {t.isOutlaw && wasOutlawEliminated && (
+          <span className="outlaw-mark eliminated" title="Outlaw was eliminated">
+            <span className="skull" aria-hidden="true">☠</span>
+            <span style={{ textDecoration: 'line-through' }}>OUTLAW</span>
+          </span>
+        )}
         {isOutlawElim && (
-          <span className="bounty-tag collected" title="Bounty collected">+$5K</span>
+          <span className="bounty-tag collected" title="Bounty Hunter: Took down an Outlaw!">
+            <span className="star" aria-hidden="true" style={{ fontSize: 10, marginRight: 2 }}>⭐</span>+$5K
+          </span>
         )}
       </span>
       <span className={`score ${scoreCls}`}>{scoreStr}</span>
@@ -244,6 +253,7 @@ function Match({ match, position, sizeClass, onOpen, highlighted, isChampionMatc
         isChampion={isChampionMatch && aWin}
         cornerClass="cell-top"
         isOutlawElim={bIsOutlaw && aWin}
+        wasOutlawEliminated={aIsOutlaw && bWin}
       />
       <TraderCell
         traderId={match.bId}
@@ -256,6 +266,7 @@ function Match({ match, position, sizeClass, onOpen, highlighted, isChampionMatc
         isChampion={isChampionMatch && bWin}
         cornerClass="cell-bottom"
         isOutlawElim={aIsOutlaw && bWin}
+        wasOutlawEliminated={bIsOutlaw && aWin}
       />
     </div>
   );
@@ -362,7 +373,7 @@ function Connectors({ layout, matchById, activePool }) {
   );
 }
 
-function RoundHeaders({ layout, activePool }) {
+function RoundHeaders({ layout, activePool, setSelectedRoundId }) {
   return (
     <div className="round-heads" style={{ width: layout.totalW, top: -44 }}>
       {layout.columns.map((col, i) => {
@@ -373,8 +384,9 @@ function RoundHeaders({ layout, activePool }) {
         return (
           <div
             key={`${col.side}-${col.spec.round}-${i}`}
-            className={`round-head ${col.spec.round === 'F' ? 'final' : ''}`}
-            style={{ position: 'absolute', left: col.x, width: col.spec.width }}
+            className={`round-head ${col.spec.round === 'F' ? 'final' : ''} is-clickable`}
+            style={{ position: 'absolute', left: col.x, width: col.spec.width, cursor: 'pointer' }}
+            onClick={() => { if (setSelectedRoundId) setSelectedRoundId(col.spec.round); }}
           >
             <div className="label">{col.spec.label}</div>
             <div className="sub">{col.spec.sub}</div>
@@ -403,7 +415,18 @@ function ChampionBanner({ match, layout }) {
   );
 }
 
-function SearchTraders({ query, setQuery, selectedId, setSelectedId, activePool, setActivePool }) {
+const ROUND_SEARCH_ITEMS = [
+  { isRound: true, id: 'R256', handle: 'Round of 256', keywords: ['r256', '256'] },
+  { isRound: true, id: 'R128', handle: 'Round of 128', keywords: ['r128', '128'] },
+  { isRound: true, id: 'R64', handle: 'Round of 64', keywords: ['r64', '64'] },
+  { isRound: true, id: 'R32', handle: 'Round of 32', keywords: ['r32', '32'] },
+  { isRound: true, id: 'R16', handle: 'Sweet 16', keywords: ['r16', '16', 'sweet'] },
+  { isRound: true, id: 'QF', handle: 'Quarterfinals', keywords: ['qf', 'quarter', 'quarterfinals'] },
+  { isRound: true, id: 'SF', handle: 'Semifinals', keywords: ['sf', 'semi', 'semifinals'] },
+  { isRound: true, id: 'F', handle: 'Championship Finals', keywords: ['f', 'final', 'finals', 'champion'] },
+];
+
+function SearchTraders({ query, setQuery, selectedId, setSelectedId, activePool, setActivePool, selectedRoundId, setSelectedRoundId }) {
   const [open, setOpen] = useState(false);
   const [hoverIdx, setHoverIdx] = useState(0);
   const inputRef = useRef(null);
@@ -412,12 +435,19 @@ function SearchTraders({ query, setQuery, selectedId, setSelectedId, activePool,
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return TRADERS.slice(0, 8);
-    return TRADERS.filter(t => {
+    
+    const roundMatches = ROUND_SEARCH_ITEMS.filter(r => 
+      r.handle.toLowerCase().includes(q) || r.keywords.some(k => k.includes(q))
+    );
+    
+    const traderMatches = TRADERS.filter(t => {
       return t.handle.toLowerCase().includes(q)
         || t.country.toLowerCase().includes(q)
         || ('seed' + t.seed).includes(q.replace(/[^a-z0-9]/g, ''))
         || (t.isOutlaw && 'outlaw'.includes(q));
     }).slice(0, 14);
+    
+    return [...roundMatches, ...traderMatches].slice(0, 14);
   }, [query]);
 
   useEffect(() => {
@@ -429,20 +459,26 @@ function SearchTraders({ query, setQuery, selectedId, setSelectedId, activePool,
 
   useEffect(() => { setHoverIdx(0); }, [query, open]);
 
-  const pickTrader = (t) => {
+  const pickItem = (t) => {
     setQuery(t.handle);
-    setSelectedId(t.id);
     setOpen(false);
     
-    // Automatically switch active pool tab to this trader's pool bracket!
-    if (t.bracket && t.bracket !== activePool) {
-      setActivePool(t.bracket);
+    if (t.isRound) {
+      setSelectedId(null);
+      if (setSelectedRoundId) setSelectedRoundId(t.id);
+    } else {
+      if (setSelectedRoundId) setSelectedRoundId(null);
+      setSelectedId(t.id);
+      if (t.bracket && t.bracket !== activePool) {
+        setActivePool(t.bracket);
+      }
     }
   };
 
   const clear = () => {
     setQuery('');
     setSelectedId(null);
+    if (setSelectedRoundId) setSelectedRoundId(null);
     setOpen(false);
     inputRef.current && inputRef.current.focus();
   };
@@ -450,15 +486,15 @@ function SearchTraders({ query, setQuery, selectedId, setSelectedId, activePool,
   const onKey = (e) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); setHoverIdx(i => Math.min(matches.length - 1, i + 1)); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setHoverIdx(i => Math.max(0, i - 1)); }
-    else if (e.key === 'Enter') { e.preventDefault(); if (matches[hoverIdx]) pickTrader(matches[hoverIdx]); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (matches[hoverIdx]) pickItem(matches[hoverIdx]); }
     else if (e.key === 'Escape') {
-      if (query || selectedId) clear();
+      if (query || selectedId || selectedRoundId) clear();
       else setOpen(false);
       inputRef.current && inputRef.current.blur();
     }
   };
 
-  const activeSelected = !!selectedId;
+  const activeSelected = !!selectedId || !!selectedRoundId;
 
   return (
     <div className={'tb-search' + (activeSelected ? ' is-active' : '')} ref={wrapRef}>
@@ -467,9 +503,9 @@ function SearchTraders({ query, setQuery, selectedId, setSelectedId, activePool,
         ref={inputRef}
         className="tb-search-input"
         type="text"
-        placeholder="Search 1,024 traders…"
+        placeholder="Search traders or rounds…"
         value={query}
-        onChange={(e) => { setQuery(e.target.value); setSelectedId(null); setOpen(true); }}
+        onChange={(e) => { setQuery(e.target.value); setSelectedId(null); if (setSelectedRoundId) setSelectedRoundId(null); setOpen(true); }}
         onFocus={() => setOpen(true)}
         onKeyDown={onKey}
         spellCheck={false}
@@ -483,23 +519,30 @@ function SearchTraders({ query, setQuery, selectedId, setSelectedId, activePool,
       {open && (
         <div className="tb-dropdown tb-search-dropdown" role="listbox">
           {matches.length === 0 && (
-            <div className="tb-empty">No traders match “{query}”</div>
+            <div className="tb-empty">No results match “{query}”</div>
           )}
           {matches.map((t, i) => (
             <button
               key={t.id}
               role="option"
               aria-selected={i === hoverIdx}
-              className={'tb-search-row' + (i === hoverIdx ? ' is-hover' : '') + (t.isOutlaw ? ' is-outlaw' : '')}
+              className={'tb-search-row' + (i === hoverIdx ? ' is-hover' : '') + (t.isOutlaw ? ' is-outlaw' : '') + (t.isRound ? ' is-round' : '')}
               onMouseEnter={() => setHoverIdx(i)}
-              onMouseDown={(e) => { e.preventDefault(); pickTrader(t); }}
+              onMouseDown={(e) => { e.preventDefault(); pickItem(t); }}
+              style={t.isRound ? { justifyContent: 'center', background: 'rgba(213, 161, 50, 0.05)' } : {}}
             >
-              <span className="tb-search-flag">{t.flag}</span>
-              <span className="tb-search-handle">{t.handle}</span>
-              <span className="tb-search-seed">#{t.seed}</span>
-              <span className="tb-search-bracket" style={{ color: 'var(--gold)', marginLeft: 8, fontSize: 9 }}>POOL {t.bracket}</span>
-              {t.isOutlaw && (
-                <span className="tb-search-outlaw"><span className="skull">☠</span>OUTLAW</span>
+              {t.isRound ? (
+                <span style={{ color: 'var(--gold)', fontWeight: 600, letterSpacing: '0.05em' }}>{t.handle}</span>
+              ) : (
+                <>
+                  <span className="tb-search-flag">{t.flag}</span>
+                  <span className="tb-search-handle">{t.handle}</span>
+                  <span className="tb-search-seed">#{t.seed}</span>
+                  <span className="tb-search-bracket" style={{ color: 'var(--gold)', marginLeft: 8, fontSize: 9 }}>POOL {t.bracket}</span>
+                  {t.isOutlaw && (
+                    <span className="tb-search-outlaw"><span className="skull">☠</span>OUTLAW</span>
+                  )}
+                </>
               )}
             </button>
           ))}
@@ -628,8 +671,8 @@ function OutlawFilter({ selectedIds, setSelectedIds, activePool, setActivePool }
   );
 }
 
-function BracketToolbar({ search, setSearch, selectedTraderId, setSelectedTraderId, outlawFilterIds, setOutlawFilterIds, totalMatches, visibleMatches, activePool, setActivePool }) {
-  const filtersActive = !!selectedTraderId || outlawFilterIds.size > 0;
+function BracketToolbar({ search, setSearch, selectedTraderId, setSelectedTraderId, outlawFilterIds, setOutlawFilterIds, totalMatches, visibleMatches, activePool, setActivePool, selectedRoundId, setSelectedRoundId }) {
+  const filtersActive = !!selectedTraderId || outlawFilterIds.size > 0 || !!selectedRoundId;
   return (
     <div className="bracket-toolbar">
       <SearchTraders
@@ -639,6 +682,8 @@ function BracketToolbar({ search, setSearch, selectedTraderId, setSelectedTrader
         setSelectedId={setSelectedTraderId}
         activePool={activePool}
         setActivePool={setActivePool}
+        selectedRoundId={selectedRoundId}
+        setSelectedRoundId={setSelectedRoundId}
       />
       <div className="tb-divider" aria-hidden="true" />
       <OutlawFilter
@@ -1079,7 +1124,7 @@ function MatchModal({ match, onClose, activePool }) {
   );
 }
 
-function Bracket({ viewState, matches, matchById, onOpenMatch, viewport, setViewport, selectedTraderId, outlawFilterIds, onMatchCount, highlightRound, activePool }) {
+function Bracket({ viewState, matches, matchById, onOpenMatch, viewport, setViewport, selectedTraderId, selectedRoundId, setSelectedRoundId, outlawFilterIds, onMatchCount, highlightRound, activePool }) {
   const layout = useLayout();
   const viewRef = useRef(null);
   const dragRef = useRef({ dragging: false, sx: 0, sy: 0, ox: 0, oy: 0, pinchDist: 0, pinchZ: 0 });
@@ -1093,10 +1138,18 @@ function Bracket({ viewState, matches, matchById, onOpenMatch, viewport, setView
     const vh = viewRef.current.clientHeight;
     
     // Auto-fit fallback
+    const isMobile = vw < 768;
     const fitZ = Math.max(0.06, Math.min(1.0, Math.min((vw - 40) / layout.totalW, (vh - 40) / layout.totalH)));
+    
     let targetZ = fitZ;
     let targetX = (vw - layout.totalW * fitZ) / 2;
     let targetY = (vh - layout.totalH * fitZ) / 2;
+
+    if (isMobile) {
+      targetZ = 0.55; // Legible baseline for mobile portrait
+      targetX = 40;   // Pin to the left side (Round of 128)
+      targetY = (vh - layout.totalH * targetZ) / 2; // Keep vertically centered
+    }
 
     // "Live Round" Auto-Focus
     if (!selectedTraderId) {
@@ -1222,7 +1275,7 @@ function Bracket({ viewState, matches, matchById, onOpenMatch, viewport, setView
     };
   }, [setViewport]);
 
-  const filtersActive = !!selectedTraderId || (outlawFilterIds && outlawFilterIds.size > 0);
+  const filtersActive = !!selectedTraderId || (outlawFilterIds && outlawFilterIds.size > 0) || !!selectedRoundId;
   const hits = useMemo(() => {
     const map = {};
     matches.forEach(m => {
@@ -1252,8 +1305,8 @@ function Bracket({ viewState, matches, matchById, onOpenMatch, viewport, setView
 
   const focusKey = useMemo(() => {
     const out = Array.from(outlawFilterIds || []).sort().join(',');
-    return (selectedTraderId || '') + '|' + out + '|' + activePool;
-  }, [selectedTraderId, outlawFilterIds, activePool]);
+    return (selectedTraderId || '') + '|' + out + '|' + activePool + '|' + (selectedRoundId || '');
+  }, [selectedTraderId, outlawFilterIds, activePool, selectedRoundId]);
 
   const [focusTargetId, setFocusTargetId] = useState(null);
   const animFrame = useRef(null);
@@ -1264,30 +1317,44 @@ function Bracket({ viewState, matches, matchById, onOpenMatch, viewport, setView
     if (!filtersActive) { setFocusTargetId(null); return; }
     if (!viewRef.current) return;
 
-    const hitMatches = matches.filter(m => hits[m.id] && hits[m.id].hit);
-    if (hitMatches.length === 0) { setFocusTargetId(null); return; }
+    let target = null;
+    let targetZoom = 1.0;
     
-    const ROUND_ORDER = { R32: 0, R16: 1, QF: 2, SF: 3, F: 4 };
-    hitMatches.sort((a, b) => {
-      const ra = ROUND_ORDER[a.round] ?? 99;
-      const rb = ROUND_ORDER[b.round] ?? 99;
-      if (ra !== rb) return ra - rb;
-      return a.index - b.index;
-    });
+    if (selectedRoundId) {
+      target = matches.find(m => m.round === selectedRoundId);
+      targetZoom = 0.8;
+      setFocusTargetId(null);
+    } else {
+      const hitMatches = matches.filter(m => hits[m.id] && hits[m.id].hit);
+      if (hitMatches.length === 0) { setFocusTargetId(null); return; }
+      
+      const ROUND_ORDER = { R32: 0, R16: 1, QF: 2, SF: 3, F: 4 };
+      hitMatches.sort((a, b) => {
+        const ra = ROUND_ORDER[a.round] ?? 99;
+        const rb = ROUND_ORDER[b.round] ?? 99;
+        if (ra !== rb) return ra - rb;
+        return a.index - b.index;
+      });
 
-    const target = hitMatches[0];
+      target = hitMatches[0];
+      setFocusTargetId(target.id);
+    }
+
+    if (!target) return;
     const pos = layout.positions[target.id];
     if (!pos) return;
 
     const vw = viewRef.current.clientWidth;
     const vh = viewRef.current.clientHeight;
-    const targetZoom = 1.0;
     const cx = pos.x + pos.w / 2;
     const cy = pos.y + pos.h / 2;
+    
     const nx = vw / 2 - cx * targetZoom;
-    const ny = vh / 2 - cy * targetZoom;
+    // For Round Focus, vertically center the entire bracket canvas
+    const ny = selectedRoundId 
+      ? (vh - layout.totalH * targetZoom) / 2 
+      : vh / 2 - cy * targetZoom;
 
-    setFocusTargetId(target.id);
     setIsAnimating(true);
 
     if (animFrame.current) cancelAnimationFrame(animFrame.current);
@@ -1342,7 +1409,7 @@ function Bracket({ viewState, matches, matchById, onOpenMatch, viewport, setView
           height: layout.totalH,
         }}
       >
-        <RoundHeaders layout={layout} activePool={activePool} />
+        <RoundHeaders layout={layout} activePool={activePool} setSelectedRoundId={setSelectedRoundId} />
         <Connectors layout={layout} matchById={matchById} activePool={activePool} />
         {matches.map((m) => {
           const pos = layout.positions[m.id];
@@ -1731,6 +1798,7 @@ export default function BracketPage() {
   const [viewport, setViewport] = useState({ zoom: 0.8, x: 80, y: 120 });
   const [search, setSearch] = useState('');
   const [selectedTraderId, setSelectedTraderId] = useState(null);
+  const [selectedRoundId, setSelectedRoundId] = useState(null);
   const [outlawFilterIds, setOutlawFilterIds] = useState(() => new Set());
   const [counts, setCounts] = useState({ total: 0, visible: 0 });
   const [isEmbed, setIsEmbed] = useState(false);
@@ -1781,6 +1849,8 @@ export default function BracketPage() {
           visibleMatches={counts.visible}
           activePool={activePool}
           setActivePool={setActivePool}
+          selectedRoundId={selectedRoundId}
+          setSelectedRoundId={setSelectedRoundId}
         />
         
         <Bracket
@@ -1791,6 +1861,8 @@ export default function BracketPage() {
           viewport={viewport}
           setViewport={setViewport}
           selectedTraderId={selectedTraderId}
+          selectedRoundId={selectedRoundId}
+          setSelectedRoundId={setSelectedRoundId}
           outlawFilterIds={outlawFilterIds}
           onMatchCount={onMatchCount}
           highlightRound={tweaks.highlight_round}
