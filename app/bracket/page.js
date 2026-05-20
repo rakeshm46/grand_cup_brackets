@@ -1118,22 +1118,32 @@ function Bracket({ viewState, matches, matchById, onOpenMatch, viewport, setView
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
   }, [setViewport]);
 
-  const onWheel = (e) => {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault();
-      const d = -e.deltaY * 0.002;
-      setViewport(v => {
-        const nz = Math.max(0.06, Math.min(1.6, v.zoom * (1 + d)));
-        const rect = viewRef.current.getBoundingClientRect();
-        const mx = e.clientX - rect.left;
-        const my = e.clientY - rect.top;
-        const k = nz / v.zoom;
-        return { zoom: nz, x: mx - (mx - v.x) * k, y: my - (my - v.y) * k };
-      });
-    } else {
-      setViewport(v => ({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }));
-    }
-  };
+  useEffect(() => {
+    const el = viewRef.current;
+    if (!el) return;
+
+    const handleWheel = (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const d = -e.deltaY * 0.002;
+        setViewport(v => {
+          const nz = Math.max(0.06, Math.min(1.6, v.zoom * (1 + d)));
+          const rect = el.getBoundingClientRect();
+          const mx = e.clientX - rect.left;
+          const my = e.clientY - rect.top;
+          const k = nz / v.zoom;
+          return { zoom: nz, x: mx - (mx - v.x) * k, y: my - (my - v.y) * k };
+        });
+      } else {
+        setViewport(v => ({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }));
+      }
+    };
+
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => {
+      el.removeEventListener('wheel', handleWheel);
+    };
+  }, [setViewport]);
 
   const filtersActive = !!selectedTraderId || (outlawFilterIds && outlawFilterIds.size > 0);
   const hits = useMemo(() => {
@@ -1244,7 +1254,6 @@ function Bracket({ viewState, matches, matchById, onOpenMatch, viewport, setView
       className="bracket-viewport"
       ref={viewRef}
       onMouseDown={onMouseDown}
-      onWheel={onWheel}
       style={{ cursor: dragRef.current.dragging ? 'grabbing' : 'grab' }}
     >
       <div
@@ -1293,6 +1302,25 @@ function Bracket({ viewState, matches, matchById, onOpenMatch, viewport, setView
 
 function ZoomControls({ viewport, setViewport }) {
   const layout = useLayout();
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const handleFsChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => document.removeEventListener('fullscreenchange', handleFsChange);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(err => {
+        console.error('Error entering fullscreen:', err);
+      });
+    } else {
+      document.exitFullscreen();
+    }
+  };
 
   const zoomBy = (f) => setViewport(v => {
     const nz = Math.max(0.06, Math.min(1.6, v.zoom * f));
@@ -1338,6 +1366,16 @@ function ZoomControls({ viewport, setViewport }) {
           <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
         </svg>
         <span>Fit</span>
+      </button>
+      <button onClick={toggleFullscreen} title="Toggle Fullscreen" style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginTop: -1 }}>
+          {isFullscreen ? (
+            <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7" />
+          ) : (
+            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+          )}
+        </svg>
+        <span>{isFullscreen ? 'Exit' : 'Full'}</span>
       </button>
     </div>
   );

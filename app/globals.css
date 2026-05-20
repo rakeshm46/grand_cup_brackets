@@ -47,7 +47,8 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 body {
-  background: var(--bg);
+  /* background: var(--bg); */
+  background: transparent;
   color: var(--ink);
   font-family: var(--font-sans);
   font-size: 14px;
@@ -61,7 +62,8 @@ body {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  background: var(--bg);
+  /* background: var(--bg); */
+  background: transparent;
   display: flex;
   flex-direction: column;
 }
