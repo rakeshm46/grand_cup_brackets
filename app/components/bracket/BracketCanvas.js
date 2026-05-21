@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { TRADERS_BY_ID } from '../../api/data-engine';
+import React, { useState, useEffect, useRef, useMemo, useContext } from 'react';
+import { BracketContext } from './BracketContext';
 import { useLayout } from '../../lib/bracketUtils';
 import { Match, Connectors } from './MatchNode';
 
@@ -27,8 +27,9 @@ export function RoundHeaders({ layout, activePool, setSelectedRoundId }) {
 }
 
 export function ChampionBanner({ match, layout }) {
+  const { tradersById } = useContext(BracketContext);
   if (!match || match.status !== 'done' || !match.winnerId || !layout) return null;
-  const champ = TRADERS_BY_ID[match.winnerId];
+  const champ = tradersById[match.winnerId];
   if (!champ) return null;
   const fin = layout.positions['F-1'];
   const cx = fin.x + fin.w / 2;

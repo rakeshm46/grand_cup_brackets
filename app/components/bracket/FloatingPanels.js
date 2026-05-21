@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { TRADERS_BY_ID, getBalanceSeries, getMatchTrades } from '../../api/data-engine';
+import React, { useState, useEffect, useRef, useMemo, useContext } from 'react';
+import { getBalanceSeries, getMatchTrades } from '../../api/data-engine';
 import { useLayout } from '../../lib/bracketUtils';
+import { BracketContext } from './BracketContext';
 
 function fmtMoney(n) {
   const sign = n < 0 ? '-' : '';
@@ -35,11 +36,15 @@ export function FighterPortrait({ trader }) {
   const palette = trader.avatarPalette || ['#1e445c', '#050607'];
   return (
     <div
-      className="big-avatar mono-big"
+      className={`big-avatar mono-big ${trader.avatarImage ? 'has-image' : ''}`}
       style={{ '--mono-a': palette[0], '--mono-b': palette[1] }}
       aria-label={trader.handle}
     >
-      {initials}
+      {trader.avatarImage ? (
+        <img src={trader.avatarImage} alt={trader.handle} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+      ) : (
+        initials
+      )}
       <span className="mono-flag-big" aria-hidden="true">{trader.flag}</span>
     </div>
   );
@@ -320,9 +325,10 @@ export function TradesTable({ match, traderA, traderB, activePool }) {
 }
 
 export function MatchModal({ match, onClose, activePool }) {
+  const { tradersById } = useContext(BracketContext);
   if (!match) return null;
-  const a = TRADERS_BY_ID[match.aId];
-  const b = match.bId ? TRADERS_BY_ID[match.bId] : null;
+  const a = tradersById[match.aId];
+  const b = match.bId ? tradersById[match.bId] : null;
   const aWin = match.winnerId && match.winnerId === match.aId;
   const bWin = match.winnerId && match.winnerId === match.bId;
   
@@ -379,7 +385,7 @@ export function MatchModal({ match, onClose, activePool }) {
               {a && <FighterPortrait trader={a} />}
               <div className="fname">{a ? a.handle : 'TBD'}</div>
               <div className="fmeta">SEED #{a ? a.seed : '—'} · {a ? a.country : '—'}</div>
-              <div className="fscore">${match.aScore.toLocaleString()}</div>
+              <div className="fscore">{match.aScore != null ? `$${match.aScore.toLocaleString()}` : '—'}</div>
             </div>
             <div className="versus">VS</div>
             {b ? (
@@ -388,7 +394,7 @@ export function MatchModal({ match, onClose, activePool }) {
                 <FighterPortrait trader={b} />
                 <div className="fname">{b.handle}</div>
                 <div className="fmeta">SEED #{b.seed} · {b.country}</div>
-                <div className="fscore">${match.bScore.toLocaleString()}</div>
+                <div className="fscore">{match.bScore != null ? `$${match.bScore.toLocaleString()}` : '—'}</div>
               </div>
             ) : (
               <div className="fighter"><div className="fmeta">TBD</div></div>
@@ -401,7 +407,7 @@ export function MatchModal({ match, onClose, activePool }) {
             </div>
             <div className="meta-cell">
               <div className="ml">Margin</div>
-              <div className="mv">${Math.abs(match.aScore - (match.bScore || 0)).toLocaleString()}</div>
+              <div className="mv">${Math.abs((match.aScore || 0) - (match.bScore || 0)).toLocaleString()}</div>
             </div>
             {hasOutlaw ? (
               <div className="meta-cell bounty-cell">

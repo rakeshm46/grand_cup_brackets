@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { TRADERS, TRADERS_BY_ID } from '../../api/data-engine';
+import React, { useState, useContext } from 'react';
+import { BracketContext } from './BracketContext';
 
 export function TopChrome() {
   return (
@@ -37,19 +37,20 @@ export function TopChrome() {
   );
 }
 
-function outlawsAlive(matches) {
+function outlawsAlive(matches, tradersById, tradersList) {
   const eliminated = new Set();
   matches.forEach(m => {
     if (m.status !== 'done' || !m.winnerId) return;
-    if (m.aId && m.aId !== m.winnerId && TRADERS_BY_ID[m.aId]?.isOutlaw) eliminated.add(m.aId);
-    if (m.bId && m.bId !== m.winnerId && TRADERS_BY_ID[m.bId]?.isOutlaw) eliminated.add(m.bId);
+    if (m.aId && m.aId !== m.winnerId && tradersById[m.aId]?.isOutlaw) eliminated.add(m.aId);
+    if (m.bId && m.bId !== m.winnerId && tradersById[m.bId]?.isOutlaw) eliminated.add(m.bId);
   });
-  const total = TRADERS.filter(t => t.isOutlaw).length;
+  const total = tradersList.filter(t => t.isOutlaw).length;
   return { alive: total - eliminated.size, total, eliminated: eliminated.size };
 }
 
 export function Header({ viewState, matches, activePool }) {
-  const outlaws = outlawsAlive(matches);
+  const { tradersById, tradersList } = useContext(BracketContext);
+  const outlaws = outlawsAlive(matches, tradersById, tradersList);
   const liveLabel = viewState === 'r32_live'
     ? 'R32 · 16'
     : viewState === 'current'
