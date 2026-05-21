@@ -39,43 +39,10 @@ export function useBracketAPI(activePool) {
           setError(null);
         }
       } catch (err) {
-        console.warn('[useBracketAPI] Live API failed, falling back to local JSON:', err.message);
-        // Fallback: load the bundled JSON for local dev / CORS-blocked environments
-        if (!rawDataRef.current) {
-          try {
-            const fallbackRes = await fetch('/api/bracket-data');
-            if (fallbackRes.ok) {
-              const fallbackJson = await fallbackRes.json();
-              if (isMounted) {
-                rawDataRef.current = fallbackJson;
-                parseAndSet(fallbackJson, activePoolRef.current);
-                setIsLoading(false);
-                setError(null);
-                return;
-              }
-            }
-          } catch (_) {
-            // fallback also failed, try importing local JSON directly
-          }
-
-          try {
-            const localJson = await import('../lib/gc2-bracket.json');
-            const json = localJson.default || localJson;
-            if (isMounted) {
-              rawDataRef.current = json;
-              parseAndSet(json, activePoolRef.current);
-              setIsLoading(false);
-              setError(null);
-              return;
-            }
-          } catch (_) {
-            // local JSON also not available
-          }
-
-          if (isMounted) {
-            setError(err.message);
-            setIsLoading(false);
-          }
+        console.error('[useBracketAPI] Error:', err.message);
+        if (isMounted && !rawDataRef.current) {
+          setError(err.message);
+          setIsLoading(false);
         }
       }
     }
