@@ -81,6 +81,7 @@ function buildGlobalTraders(data) {
   const outlawsMap = {};
   if (data.outlaws) {
     data.outlaws.forEach(outlaw => {
+      if (!outlaw || outlaw.stage_participant_id == null) return;
       outlawsMap[outlaw.stage_participant_id] = outlaw;
     });
   }
@@ -92,9 +93,9 @@ function buildGlobalTraders(data) {
       bracketData.rounds.forEach(round => {
         if (!round.matchups) return;
         round.matchups.forEach(matchup => {
-          if (!matchup.participants) return;
+          if (!matchup || !matchup.participants) return;
           matchup.participants.forEach(p => {
-            if (p.stage_participant_id == null) return; // skip TBA slots
+            if (!p || p.stage_participant_id == null) return; // skip null entries and TBA slots
             const idStr = String(p.stage_participant_id);
             if (tradersById[idStr]) return; // already registered
 
@@ -155,6 +156,7 @@ function buildPoolMatches(data, activePool) {
 
       if (!round.matchups) return;
       round.matchups.forEach(matchup => {
+        if (!matchup) return;
         // API returns identical slot_label for all matchups, so use match_index instead.
         // Apply modulo so each pool's indices (e.g. Beta 128-255) map to local positions (0-127).
         const normalizedIndex = matchup.match_index != null ? matchup.match_index % roundSize : null;
